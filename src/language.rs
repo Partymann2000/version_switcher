@@ -197,7 +197,7 @@ impl Language {
         format!("Error/Fehler: {}", err)
     }
 
-    // NEU: Import / Export Texte
+    // Import / Export
     pub fn tooltip_import(&self) -> &str {
         match self {
             Language::English => "Import configuration (JSON)",
@@ -237,6 +237,63 @@ impl Language {
         match self {
             Language::English => format!("Export Error: {}", err),
             Language::German => format!("Export Fehler: {}", err),
+        }
+    }
+
+    // NEU: Path Cleaner
+    pub fn tooltip_cleaner(&self) -> &str {
+        match self {
+            Language::English => "Path Cleaner: Find broken or duplicate paths",
+            Language::German => "Pfad-Bereinigung: Defekte oder doppelte Pfade finden",
+        }
+    }
+
+    pub fn window_cleaner_title(&self) -> &str {
+        match self {
+            Language::English => "System Path Cleaner",
+            Language::German => "System-Pfad Bereinigung",
+        }
+    }
+
+    pub fn btn_scan(&self) -> &str {
+        match self {
+            Language::English => "Scan Path Now",
+            Language::German => "Pfad jetzt scannen",
+        }
+    }
+
+    pub fn label_no_issues(&self) -> &str {
+        match self {
+            Language::English => "Great! No broken or duplicate paths found.",
+            Language::German => "Super! Keine defekten oder doppelten Pfade gefunden.",
+        }
+    }
+
+    pub fn btn_clean_selected(&self) -> &str {
+        match self {
+            Language::English => "Clean Selected",
+            Language::German => "Ausgewählte bereinigen",
+        }
+    }
+
+    pub fn status_cleaned(&self, count: usize) -> String {
+        match self {
+            Language::English => format!("Removed {} entries from PATH.", count),
+            Language::German => format!("{} Einträge aus PATH entfernt.", count),
+        }
+    }
+
+    pub fn issue_missing(&self) -> &str {
+        match self {
+            Language::English => "Missing",
+            Language::German => "Fehlt",
+        }
+    }
+
+    pub fn issue_duplicate(&self) -> &str {
+        match self {
+            Language::English => "Duplicate",
+            Language::German => "Duplikat",
         }
     }
 }

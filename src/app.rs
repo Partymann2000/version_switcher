@@ -1,7 +1,7 @@
 use eframe::egui;
 use notify_rust::Notification;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
@@ -16,6 +16,20 @@ const ENV_KEY: &str = "Environment";
 struct VersionEntry {
     path: String,
     alias: String,
+}
+
+// Strukturen für den Path Cleaner
+#[derive(Clone, Debug, PartialEq)]
+enum IssueType {
+    Missing,   // Ordner existiert nicht
+    Duplicate, // Ordner steht doppelt drin
+}
+
+#[derive(Clone, Debug)]
+struct CleanerEntry {
+    path: String,
+    issue: IssueType,
+    selected: bool,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -41,6 +55,16 @@ pub struct VersionSwitcherApp {
     edit_name_buffer: String,
     #[serde(skip)]
     edit_path_buffer: String,
+
+    // Cleaner Status
+    #[serde(skip)]
+    show_cleaner_window: bool,
+    #[serde(skip)]
+    cleaner_issues: Vec<CleanerEntry>,
+
+    // NEU: Such-Status
+    #[serde(skip)]
+    search_query: String,
 }
 
 impl Default for VersionSwitcherApp {
@@ -56,6 +80,9 @@ impl Default for VersionSwitcherApp {
             editing_index: None,
             edit_name_buffer: String::new(),
             edit_path_buffer: String::new(),
+            show_cleaner_window: false,
+            cleaner_issues: Vec::new(),
+            search_query: String::new(),
         }
     }
 }
@@ -94,7 +121,7 @@ impl VersionSwitcherApp {
         env.get_value("Path").unwrap_or_default()
     }
 
-    fn set_path_var(&mut self, new_path: String, active_alias: &str, _active_path: &str) -> Result<(), String> {
+    fn set_path_var(&mut self, new_path: String, active_alias: Option<&str>) -> Result<(), String> {
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         let env = match hkcu.open_subkey_with_flags(ENV_KEY, KEY_WRITE) {
             Ok(key) => key,
@@ -113,12 +140,16 @@ impl VersionSwitcherApp {
                         SMTO_ABORTIFHUNG, 5000, ptr::null_mut(),
                     );
                 }
-                Notification::new()
-                    .summary(self.app_language.notify_title())
-                    .body(&self.app_language.notify_body(active_alias))
-                    .appname("Version Switcher")
-                    .show()
-                    .ok();
+
+                // Notification nur zeigen, wenn wir explizit eine Version gewechselt haben
+                if let Some(alias) = active_alias {
+                    Notification::new()
+                        .summary(self.app_language.notify_title())
+                        .body(&self.app_language.notify_body(alias))
+                        .appname("Version Switcher")
+                        .show()
+                        .ok();
+                }
                 Ok(())
             },
             Err(e) => Err(format!("Write Error: {}", e)),
@@ -141,13 +172,13 @@ impl VersionSwitcherApp {
         parts.insert(0, target_path.to_string());
         let new_path_str = parts.join(";");
 
-        match self.set_path_var(new_path_str, target_alias, target_path) {
+        match self.set_path_var(new_path_str, Some(target_alias)) {
             Ok(_) => self.status_message = self.app_language.status_activated(target_path),
             Err(e) => self.status_message = self.app_language.status_error(&e),
         }
     }
 
-    // NEU: Export Funktion
+    // Export Funktion
     fn export_config(&mut self) {
         if let Some(path) = rfd::FileDialog::new().set_file_name("version_switcher_config.json").save_file() {
             match File::create(path) {
@@ -164,7 +195,7 @@ impl VersionSwitcherApp {
         }
     }
 
-    // NEU: Import Funktion
+    // Import Funktion
     fn import_config(&mut self) {
         if let Some(path) = rfd::FileDialog::new().pick_file() {
             match File::open(path) {
@@ -173,7 +204,6 @@ impl VersionSwitcherApp {
                     match serde_json::from_reader(reader) {
                         Ok(languages) => {
                             self.languages = languages;
-                            // Reset selection if current group doesn't exist anymore
                             if !self.languages.contains_key(&self.selected_group) {
                                 if let Some(first_key) = self.languages.keys().next() {
                                     self.selected_group = first_key.clone();
@@ -188,6 +218,88 @@ impl VersionSwitcherApp {
                 },
                 Err(e) => self.status_message = self.app_language.status_import_err(&e.to_string()),
             }
+        }
+    }
+
+    // Path Cleaner - Scannen
+    fn scan_path_issues(&mut self) {
+        let current_path = self.get_current_path_var();
+        let parts: Vec<&str> = current_path.split(';').filter(|s| !s.is_empty()).collect();
+
+        let mut entries = Vec::new();
+        let mut seen = HashSet::new();
+
+        for p in parts {
+            let p_string = p.to_string();
+            let mut issue = None;
+
+            // Check Duplicate (Case Insensitive für Windows)
+            if seen.contains(&p_string.to_lowercase()) {
+                issue = Some(IssueType::Duplicate);
+            } else {
+                seen.insert(p_string.to_lowercase());
+                // Check Existence
+                if !Path::new(p).exists() {
+                    issue = Some(IssueType::Missing);
+                }
+            }
+
+            if let Some(iss) = issue {
+                entries.push(CleanerEntry {
+                    path: p_string,
+                    issue: iss,
+                    selected: true,
+                });
+            }
+        }
+        self.cleaner_issues = entries;
+    }
+
+    // Path Cleaner - Aufräumen
+    fn clean_selected_paths(&mut self) {
+        let to_remove_missing: HashSet<String> = self.cleaner_issues.iter()
+            .filter(|e| e.selected && e.issue == IssueType::Missing)
+            .map(|e| e.path.to_lowercase())
+            .collect();
+
+        let to_deduplicate: HashSet<String> = self.cleaner_issues.iter()
+            .filter(|e| e.selected && e.issue == IssueType::Duplicate)
+            .map(|e| e.path.to_lowercase())
+            .collect();
+
+        if to_remove_missing.is_empty() && to_deduplicate.is_empty() {
+            return;
+        }
+
+        let current_path = self.get_current_path_var();
+        let parts: Vec<&str> = current_path.split(';').filter(|s| !s.is_empty()).collect();
+        let mut new_parts = Vec::new();
+        let mut seen = HashSet::new();
+        let mut removed_count = 0;
+
+        for p in parts {
+            let p_lower = p.to_lowercase();
+            if to_remove_missing.contains(&p_lower) {
+                removed_count += 1;
+                continue;
+            }
+            if to_deduplicate.contains(&p_lower) {
+                if seen.contains(&p_lower) {
+                    removed_count += 1;
+                    continue;
+                }
+            }
+            seen.insert(p_lower);
+            new_parts.push(p);
+        }
+
+        let new_path_str = new_parts.join(";");
+
+        if let Ok(_) = self.set_path_var(new_path_str, None) {
+            self.status_message = self.app_language.status_cleaned(removed_count);
+            self.scan_path_issues();
+        } else {
+            self.status_message = "Error writing Path".to_owned();
         }
     }
 }
@@ -215,6 +327,57 @@ impl eframe::App for VersionSwitcherApp {
             }
         }
 
+        // Cleaner Fenster
+        if self.show_cleaner_window {
+            let lang = self.app_language;
+
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of("cleaner_window"),
+                egui::ViewportBuilder::default()
+                    .with_title(lang.window_cleaner_title())
+                    .with_inner_size([500.0, 400.0]),
+                |ctx, class| {
+                    assert!(class == egui::ViewportClass::Immediate, "This egui backend doesn't support multiple viewports");
+
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        ui.heading(lang.window_cleaner_title());
+                        if ui.button(lang.btn_scan()).clicked() {
+                            self.scan_path_issues();
+                        }
+                        ui.separator();
+                        if self.cleaner_issues.is_empty() {
+                            ui.label(lang.label_no_issues());
+                        } else {
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                for entry in &mut self.cleaner_issues {
+                                    ui.horizontal(|ui| {
+                                        ui.checkbox(&mut entry.selected, "");
+                                        match entry.issue {
+                                            IssueType::Missing => {
+                                                ui.colored_label(egui::Color32::RED, format!("[{}]", lang.issue_missing()));
+                                            }
+                                            IssueType::Duplicate => {
+                                                ui.colored_label(egui::Color32::YELLOW, format!("[{}]", lang.issue_duplicate()));
+                                            }
+                                        }
+                                        ui.label(&entry.path);
+                                    });
+                                }
+                            });
+                            ui.separator();
+                            if ui.button(lang.btn_clean_selected()).clicked() {
+                                self.clean_selected_paths();
+                            }
+                        }
+                    });
+
+                    if ctx.input(|i| i.viewport().close_requested()) {
+                        self.show_cleaner_window = false;
+                    }
+                }
+            );
+        }
+
         let current_sys_path_str = self.get_current_path_var();
         let current_sys_paths: Vec<String> = current_sys_path_str.split(';')
             .filter(|s| !s.is_empty())
@@ -227,7 +390,6 @@ impl eframe::App for VersionSwitcherApp {
                 ui.heading(egui::RichText::new("Windows Version Switcher").color(egui::Color32::WHITE));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
 
-                    // 1. Language Selector
                     egui::ComboBox::from_id_salt("app_lang_select")
                         .width(100.0)
                         .selected_text(match self.app_language {
@@ -244,12 +406,21 @@ impl eframe::App for VersionSwitcherApp {
                     ui.separator();
                     ui.add_space(10.0);
 
-                    // 2. Import / Export Buttons (Links vom Sprach-Selektor)
+                    // Import / Export
                     if ui.button("📥").on_hover_text(self.app_language.tooltip_import()).clicked() {
                         self.import_config();
                     }
                     if ui.button("📤").on_hover_text(self.app_language.tooltip_export()).clicked() {
                         self.export_config();
+                    }
+
+                    // Cleaner Button
+                    ui.add_space(5.0);
+                    if ui.button("🧹").on_hover_text(self.app_language.tooltip_cleaner()).clicked() {
+                        self.show_cleaner_window = !self.show_cleaner_window;
+                        if self.show_cleaner_window {
+                            self.scan_path_issues();
+                        }
                     }
                 });
             });
@@ -337,7 +508,38 @@ impl eframe::App for VersionSwitcherApp {
             });
 
             ui.add_space(10.0);
-            ui.label(egui::RichText::new(self.app_language.header_available()).heading());
+
+            // --- HEADER LISTE & SUCHE ---
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(self.app_language.header_available()).heading());
+
+                // Flexible Space
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+
+                    // FIX: Explizites Left-to-Right Layout innerhalb des Right-to-Left Headers.
+                    // Das sorgt dafür, dass:
+                    // 1. Die Sucheingabe ZUERST kommt (Index 0) -> Fokus bleibt stabil
+                    // 2. Der Button DANACH kommt (Index 1) -> Visuell rechts daneben
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        let hint = match self.app_language {
+                            Language::English => "Search...",
+                            Language::German => "Suchen...",
+                        };
+
+                        // Suchfeld
+                        ui.add(egui::TextEdit::singleline(&mut self.search_query).hint_text(hint).desired_width(150.0));
+
+                        // Clear-Button (erscheint rechts vom Feld)
+                        if !self.search_query.is_empty() {
+                            if ui.button("❌").clicked() {
+                                self.search_query.clear();
+                            }
+                        }
+                    });
+
+                    ui.label("🔍");
+                });
+            });
 
             // Liste & Aktionen
             let mut move_up = None;
@@ -350,11 +552,24 @@ impl eframe::App for VersionSwitcherApp {
 
             let lang = self.app_language;
 
+            // Suchbegriff für Filter vorbereiten
+            let query = self.search_query.to_lowercase();
+            let has_filter = !query.is_empty();
+
             if let Some(versions) = self.languages.get_mut(&self.selected_group) {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     let len = versions.len();
 
                     for (idx, entry) in versions.iter_mut().enumerate() {
+                        // --- LIVE-FILTER ---
+                        if has_filter {
+                            let matches_alias = entry.alias.to_lowercase().contains(&query);
+                            let matches_path = entry.path.to_lowercase().contains(&query);
+                            if !matches_alias && !matches_path {
+                                continue; // Eintrag überspringen wenn er nicht passt
+                            }
+                        }
+
                         ui.group(|ui| {
                             if self.editing_index == Some(idx) {
                                 // Editier Modus
@@ -378,14 +593,17 @@ impl eframe::App for VersionSwitcherApp {
 
                                     if is_active { ui.label("🟢"); } else { ui.label("⚪"); }
 
-                                    ui.vertical(|ui| {
-                                        if idx > 0 {
-                                            if ui.small_button("⬆").on_hover_text(lang.tooltip_move_up()).clicked() { move_up = Some(idx); }
-                                        }
-                                        if idx < len - 1 {
-                                            if ui.small_button("⬇").on_hover_text(lang.tooltip_move_down()).clicked() { move_down = Some(idx); }
-                                        }
-                                    });
+                                    // Sortier Pfeile nur zeigen wenn KEIN Filter aktiv ist (sonst verwirrend)
+                                    if !has_filter {
+                                        ui.vertical(|ui| {
+                                            if idx > 0 {
+                                                if ui.small_button("⬆").on_hover_text(lang.tooltip_move_up()).clicked() { move_up = Some(idx); }
+                                            }
+                                            if idx < len - 1 {
+                                                if ui.small_button("⬇").on_hover_text(lang.tooltip_move_down()).clicked() { move_down = Some(idx); }
+                                            }
+                                        });
+                                    }
 
                                     ui.vertical(|ui| {
                                         ui.label(egui::RichText::new(&entry.alias).strong().size(16.0));
