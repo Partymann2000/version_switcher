@@ -3,6 +3,8 @@ use notify_rust::Notification;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
+use std::fs::File;
+use std::io::{BufReader, BufWriter};
 use winreg::enums::*;
 use winreg::RegKey;
 
@@ -33,8 +35,6 @@ pub struct VersionSwitcherApp {
     #[serde(skip)]
     status_message: String,
 
-    // NEU: Status für das Editieren eines Eintrags
-    // Wir merken uns den Index des Elements, das gerade bearbeitet wird
     #[serde(skip)]
     editing_index: Option<usize>,
     #[serde(skip)]
@@ -62,28 +62,22 @@ impl Default for VersionSwitcherApp {
 
 impl VersionSwitcherApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // --- 1. CUSTOM STYLING (Dark Mode + Orange) ---
         Self::configure_styles(&cc.egui_ctx);
-
         if let Some(storage) = cc.storage {
             return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
         }
         Default::default()
     }
 
-    // Funktion für das Design
     fn configure_styles(ctx: &egui::Context) {
         let mut visuals = egui::Visuals::dark();
-
-        // Farben anpassen (Orange Akzente)
-        let orange = egui::Color32::from_rgb(255, 140, 0); // Dark Orange
+        let orange = egui::Color32::from_rgb(255, 140, 0);
         let dark_gray = egui::Color32::from_rgb(30, 30, 30);
 
         visuals.widgets.noninteractive.bg_fill = dark_gray;
         visuals.selection.bg_fill = orange;
         visuals.selection.stroke = egui::Stroke::new(1.0, orange);
 
-        // Abrundungen für modernere Optik
         visuals.window_rounding = egui::Rounding::same(8.0);
         visuals.widgets.noninteractive.rounding = egui::Rounding::same(4.0);
         visuals.widgets.inactive.rounding = egui::Rounding::same(4.0);
@@ -119,14 +113,12 @@ impl VersionSwitcherApp {
                         SMTO_ABORTIFHUNG, 5000, ptr::null_mut(),
                     );
                 }
-
                 Notification::new()
                     .summary(self.app_language.notify_title())
                     .body(&self.app_language.notify_body(active_alias))
                     .appname("Version Switcher")
                     .show()
                     .ok();
-
                 Ok(())
             },
             Err(e) => Err(format!("Write Error: {}", e)),
@@ -154,6 +146,50 @@ impl VersionSwitcherApp {
             Err(e) => self.status_message = self.app_language.status_error(&e),
         }
     }
+
+    // NEU: Export Funktion
+    fn export_config(&mut self) {
+        if let Some(path) = rfd::FileDialog::new().set_file_name("version_switcher_config.json").save_file() {
+            match File::create(path) {
+                Ok(file) => {
+                    let writer = BufWriter::new(file);
+                    if let Err(e) = serde_json::to_writer_pretty(writer, &self.languages) {
+                        self.status_message = self.app_language.status_export_err(&e.to_string());
+                    } else {
+                        self.status_message = self.app_language.status_export_ok().to_string();
+                    }
+                },
+                Err(e) => self.status_message = self.app_language.status_export_err(&e.to_string()),
+            }
+        }
+    }
+
+    // NEU: Import Funktion
+    fn import_config(&mut self) {
+        if let Some(path) = rfd::FileDialog::new().pick_file() {
+            match File::open(path) {
+                Ok(file) => {
+                    let reader = BufReader::new(file);
+                    match serde_json::from_reader(reader) {
+                        Ok(languages) => {
+                            self.languages = languages;
+                            // Reset selection if current group doesn't exist anymore
+                            if !self.languages.contains_key(&self.selected_group) {
+                                if let Some(first_key) = self.languages.keys().next() {
+                                    self.selected_group = first_key.clone();
+                                } else {
+                                    self.selected_group = "General".to_owned();
+                                }
+                            }
+                            self.status_message = self.app_language.status_import_ok().to_string();
+                        },
+                        Err(e) => self.status_message = self.app_language.status_import_err(&e.to_string()),
+                    }
+                },
+                Err(e) => self.status_message = self.app_language.status_import_err(&e.to_string()),
+            }
+        }
+    }
 }
 
 impl eframe::App for VersionSwitcherApp {
@@ -162,7 +198,7 @@ impl eframe::App for VersionSwitcherApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // --- 2. DRAG & DROP LOGIK ---
+        // Drag & Drop
         if !ctx.input(|i| i.raw.dropped_files.is_empty()) {
             let dropped_files = ctx.input(|i| i.raw.dropped_files.clone());
             for file in dropped_files {
@@ -190,6 +226,8 @@ impl eframe::App for VersionSwitcherApp {
             ui.horizontal(|ui| {
                 ui.heading(egui::RichText::new("Windows Version Switcher").color(egui::Color32::WHITE));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+
+                    // 1. Language Selector
                     egui::ComboBox::from_id_salt("app_lang_select")
                         .width(100.0)
                         .selected_text(match self.app_language {
@@ -201,6 +239,18 @@ impl eframe::App for VersionSwitcherApp {
                             ui.selectable_value(&mut self.app_language, Language::German, "🇩🇪 Deutsch");
                         });
                     ui.label(self.app_language.label_app_language());
+
+                    ui.add_space(10.0);
+                    ui.separator();
+                    ui.add_space(10.0);
+
+                    // 2. Import / Export Buttons (Links vom Sprach-Selektor)
+                    if ui.button("📥").on_hover_text(self.app_language.tooltip_import()).clicked() {
+                        self.import_config();
+                    }
+                    if ui.button("📤").on_hover_text(self.app_language.tooltip_export()).clicked() {
+                        self.export_config();
+                    }
                 });
             });
 
@@ -233,7 +283,7 @@ impl eframe::App for VersionSwitcherApp {
 
             ui.separator();
 
-            // Neuer Eintrag Hinzufügen
+            // Neuer Eintrag
             ui.group(|ui| {
                 ui.label(egui::RichText::new(self.app_language.header_add_version(&self.selected_group)).strong().color(egui::Color32::from_rgb(255, 140, 0)));
 
@@ -289,17 +339,15 @@ impl eframe::App for VersionSwitcherApp {
             ui.add_space(10.0);
             ui.label(egui::RichText::new(self.app_language.header_available()).heading());
 
-            // --- 3. & 4. SORTIEREN & EDITIEREN LOGIK ---
+            // Liste & Aktionen
             let mut move_up = None;
             let mut move_down = None;
             let mut delete_index = None;
             let mut start_edit = None;
             let mut save_edit = None;
             let mut cancel_edit = false;
-            // FIX: Variable um den Switch-Wunsch zu speichern, statt direkt auszuführen
             let mut activate_version = None;
 
-            // FIX: Lokale Variable für Language, um self-Borrowing in der Schleife zu vermeiden
             let lang = self.app_language;
 
             if let Some(versions) = self.languages.get_mut(&self.selected_group) {
@@ -308,32 +356,28 @@ impl eframe::App for VersionSwitcherApp {
 
                     for (idx, entry) in versions.iter_mut().enumerate() {
                         ui.group(|ui| {
-                            // IST DIESER EINTRAG GERADE IM EDITIER-MODUS?
                             if self.editing_index == Some(idx) {
-                                // --- EDITIER MODUS ---
+                                // Editier Modus
                                 ui.horizontal(|ui| {
                                     ui.label("Name:");
                                     ui.text_edit_singleline(&mut self.edit_name_buffer);
                                     ui.label("Pfad:");
                                     ui.text_edit_singleline(&mut self.edit_path_buffer);
 
-                                    // Speichern
                                     if ui.button("💾").on_hover_text(lang.tooltip_save()).clicked() {
                                         save_edit = Some(idx);
                                     }
-                                    // Abbrechen
                                     if ui.button("❌").on_hover_text(lang.tooltip_cancel()).clicked() {
                                         cancel_edit = true;
                                     }
                                 });
                             } else {
-                                // --- ANZEIGE MODUS ---
+                                // Anzeige Modus
                                 ui.horizontal(|ui| {
                                     let is_active = current_sys_paths.iter().any(|p| p.eq_ignore_ascii_case(&entry.path));
 
                                     if is_active { ui.label("🟢"); } else { ui.label("⚪"); }
 
-                                    // Sortier Pfeile
                                     ui.vertical(|ui| {
                                         if idx > 0 {
                                             if ui.small_button("⬆").on_hover_text(lang.tooltip_move_up()).clicked() { move_up = Some(idx); }
@@ -358,17 +402,12 @@ impl eframe::App for VersionSwitcherApp {
                                     });
 
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        // Löschen
                                         if ui.button("🗑").on_hover_text(lang.tooltip_delete()).clicked() { delete_index = Some(idx); }
-
-                                        // Editieren Starten
                                         if ui.button("✏").on_hover_text(lang.tooltip_edit()).clicked() { start_edit = Some((idx, entry.alias.clone(), entry.path.clone())); }
 
-                                        // Aktivieren
                                         let btn_text = if is_active { lang.btn_is_active() } else { lang.btn_activate() };
                                         let btn = egui::Button::new(btn_text).selected(is_active);
                                         if ui.add_enabled(!is_active, btn).clicked() {
-                                            // FIX: NICHT self.switch_version aufrufen, sondern merken!
                                             activate_version = Some((entry.path.clone(), entry.alias.clone()));
                                         }
                                     });
@@ -378,19 +417,15 @@ impl eframe::App for VersionSwitcherApp {
                     }
                 });
 
-                // --- AKTIONEN DURCHFÜHREN (Nach der Schleife) ---
-                // 1. Sortieren
                 if let Some(idx) = move_up { versions.swap(idx, idx - 1); }
                 if let Some(idx) = move_down { versions.swap(idx, idx + 1); }
 
-                // 2. Editieren Starten
                 if let Some((idx, name, path)) = start_edit {
                     self.editing_index = Some(idx);
                     self.edit_name_buffer = name;
                     self.edit_path_buffer = path;
                 }
 
-                // 3. Editieren Speichern
                 if let Some(idx) = save_edit {
                     if let Some(entry) = versions.get_mut(idx) {
                         entry.alias = self.edit_name_buffer.clone();
@@ -399,19 +434,14 @@ impl eframe::App for VersionSwitcherApp {
                     self.editing_index = None;
                 }
 
-                // 4. Editieren Abbrechen
-                if cancel_edit {
-                    self.editing_index = None;
-                }
+                if cancel_edit { self.editing_index = None; }
 
-                // 5. Löschen
                 if let Some(idx) = delete_index {
                     versions.remove(idx);
                     if self.editing_index == Some(idx) { self.editing_index = None; }
                 }
-            } // Hier endet der Borrow von self.languages (versions)
+            }
 
-            // FIX: Hier führen wir das Umschalten aus, da "versions" nicht mehr ausgeliehen ist
             if let Some((path, alias)) = activate_version {
                 self.switch_version(&path, &alias);
             }

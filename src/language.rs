@@ -109,7 +109,6 @@ impl Language {
         }
     }
 
-    // NEU: Editieren & Sortieren
     pub fn tooltip_edit(&self) -> &str {
         match self {
             Language::English => "Edit",
@@ -182,8 +181,8 @@ impl Language {
 
     pub fn status_ready(&self) -> &str {
         match self {
-            Language::English => "Ready. Drag & Drop folder supported.",
-            Language::German => "Bereit. Drag & Drop von Ordnern möglich.",
+            Language::English => "Ready.",
+            Language::German => "Bereit.",
         }
     }
 
@@ -196,5 +195,48 @@ impl Language {
 
     pub fn status_error(&self, err: &str) -> String {
         format!("Error/Fehler: {}", err)
+    }
+
+    // NEU: Import / Export Texte
+    pub fn tooltip_import(&self) -> &str {
+        match self {
+            Language::English => "Import configuration (JSON)",
+            Language::German => "Konfiguration importieren (JSON)",
+        }
+    }
+
+    pub fn tooltip_export(&self) -> &str {
+        match self {
+            Language::English => "Export configuration (JSON)",
+            Language::German => "Konfiguration exportieren (JSON)",
+        }
+    }
+
+    pub fn status_import_ok(&self) -> &str {
+        match self {
+            Language::English => "Configuration imported successfully.",
+            Language::German => "Konfiguration erfolgreich importiert.",
+        }
+    }
+
+    pub fn status_export_ok(&self) -> &str {
+        match self {
+            Language::English => "Configuration exported successfully.",
+            Language::German => "Konfiguration erfolgreich exportiert.",
+        }
+    }
+
+    pub fn status_import_err(&self, err: &str) -> String {
+        match self {
+            Language::English => format!("Import Error: {}", err),
+            Language::German => format!("Import Fehler: {}", err),
+        }
+    }
+
+    pub fn status_export_err(&self, err: &str) -> String {
+        match self {
+            Language::English => format!("Export Error: {}", err),
+            Language::German => format!("Export Fehler: {}", err),
+        }
     }
 }
