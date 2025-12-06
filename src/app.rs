@@ -6,10 +6,8 @@ use std::path::Path;
 use winreg::enums::*;
 use winreg::RegKey;
 
-// Wir importieren das Language Enum aus unserer neuen Datei
 use crate::language::Language;
 
-// Registry-Schlüssel
 const ENV_KEY: &str = "Environment";
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -23,11 +21,9 @@ struct VersionEntry {
 pub struct VersionSwitcherApp {
     languages: HashMap<String, Vec<VersionEntry>>,
     selected_group: String,
-
-    // Die App-Sprache
     app_language: Language,
 
-    // UI-Status Variablen (werden nicht gespeichert)
+    // UI-Status Variablen
     #[serde(skip)]
     new_group_name: String,
     #[serde(skip)]
@@ -36,6 +32,15 @@ pub struct VersionSwitcherApp {
     new_alias_input: String,
     #[serde(skip)]
     status_message: String,
+
+    // NEU: Status für das Editieren eines Eintrags
+    // Wir merken uns den Index des Elements, das gerade bearbeitet wird
+    #[serde(skip)]
+    editing_index: Option<usize>,
+    #[serde(skip)]
+    edit_name_buffer: String,
+    #[serde(skip)]
+    edit_path_buffer: String,
 }
 
 impl Default for VersionSwitcherApp {
@@ -48,26 +53,53 @@ impl Default for VersionSwitcherApp {
             new_path_input: String::new(),
             new_alias_input: String::new(),
             status_message: "Bereit.".to_owned(),
+            editing_index: None,
+            edit_name_buffer: String::new(),
+            edit_path_buffer: String::new(),
         }
     }
 }
 
 impl VersionSwitcherApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // --- 1. CUSTOM STYLING (Dark Mode + Orange) ---
+        Self::configure_styles(&cc.egui_ctx);
+
         if let Some(storage) = cc.storage {
             return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
         }
         Default::default()
     }
 
-    // Holt den aktuellen PATH aus der Registry
+    // Funktion für das Design
+    fn configure_styles(ctx: &egui::Context) {
+        let mut visuals = egui::Visuals::dark();
+
+        // Farben anpassen (Orange Akzente)
+        let orange = egui::Color32::from_rgb(255, 140, 0); // Dark Orange
+        let dark_gray = egui::Color32::from_rgb(30, 30, 30);
+
+        visuals.widgets.noninteractive.bg_fill = dark_gray;
+        visuals.selection.bg_fill = orange;
+        visuals.selection.stroke = egui::Stroke::new(1.0, orange);
+
+        // Abrundungen für modernere Optik
+        visuals.window_rounding = egui::Rounding::same(8.0);
+        visuals.widgets.noninteractive.rounding = egui::Rounding::same(4.0);
+        visuals.widgets.inactive.rounding = egui::Rounding::same(4.0);
+        visuals.widgets.hovered.rounding = egui::Rounding::same(4.0);
+        visuals.widgets.active.rounding = egui::Rounding::same(4.0);
+        visuals.widgets.open.rounding = egui::Rounding::same(4.0);
+
+        ctx.set_visuals(visuals);
+    }
+
     fn get_current_path_var(&self) -> String {
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         let env = hkcu.open_subkey(ENV_KEY).unwrap_or_else(|_| hkcu.create_subkey(ENV_KEY).unwrap().0);
         env.get_value("Path").unwrap_or_default()
     }
 
-    // Schreibt den PATH und benachrichtigt Windows
     fn set_path_var(&mut self, new_path: String, active_alias: &str, _active_path: &str) -> Result<(), String> {
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         let env = match hkcu.open_subkey_with_flags(ENV_KEY, KEY_WRITE) {
@@ -77,7 +109,6 @@ impl VersionSwitcherApp {
 
         match env.set_value("Path", &new_path) {
             Ok(_) => {
-                // 1. Technische Nachricht an Windows
                 use std::ptr;
                 #[cfg(windows)]
                 unsafe {
@@ -89,7 +120,6 @@ impl VersionSwitcherApp {
                     );
                 }
 
-                // 2. Visuelle Nachricht (in der gewählten Sprache)
                 Notification::new()
                     .summary(self.app_language.notify_title())
                     .body(&self.app_language.notify_body(active_alias))
@@ -103,7 +133,6 @@ impl VersionSwitcherApp {
         }
     }
 
-    // Die Logik zum Austauschen
     fn switch_version(&mut self, target_path: &str, target_alias: &str) {
         let current_path_str = self.get_current_path_var();
         let mut parts: Vec<String> = current_path_str.split(';')
@@ -111,17 +140,13 @@ impl VersionSwitcherApp {
             .map(|s| s.to_string())
             .collect();
 
-        // 1. Alte Versionen dieser Gruppe entfernen
         if let Some(versions) = self.languages.get(&self.selected_group) {
             for v in versions {
                 parts.retain(|p| !p.eq_ignore_ascii_case(&v.path));
             }
         }
 
-        // 2. Neuen Pfad vorne einfügen
         parts.insert(0, target_path.to_string());
-
-        // 3. Zusammenbauen und Schreiben
         let new_path_str = parts.join(";");
 
         match self.set_path_var(new_path_str, target_alias, target_path) {
@@ -137,18 +162,33 @@ impl eframe::App for VersionSwitcherApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let current_sys_path_str = self.get_current_path_var();
+        // --- 2. DRAG & DROP LOGIK ---
+        if !ctx.input(|i| i.raw.dropped_files.is_empty()) {
+            let dropped_files = ctx.input(|i| i.raw.dropped_files.clone());
+            for file in dropped_files {
+                if let Some(path) = file.path {
+                    if path.is_dir() {
+                        self.new_path_input = path.display().to_string();
+                        if self.new_alias_input.is_empty() {
+                            if let Some(folder_name) = path.file_name() {
+                                self.new_alias_input = folder_name.to_string_lossy().to_string();
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
-        // Splitte PATH für exakten Abgleich
+        let current_sys_path_str = self.get_current_path_var();
         let current_sys_paths: Vec<String> = current_sys_path_str.split(';')
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .collect();
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            // Header mit Sprachauswahl
+            // Header
             ui.horizontal(|ui| {
-                ui.heading("Windows Version Switcher");
+                ui.heading(egui::RichText::new("Windows Version Switcher").color(egui::Color32::WHITE));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     egui::ComboBox::from_id_salt("app_lang_select")
                         .width(100.0)
@@ -166,11 +206,11 @@ impl eframe::App for VersionSwitcherApp {
 
             ui.add_space(10.0);
 
-            // --- GRUPPEN AUSWÄHLEN (z.B. Python) ---
+            // Gruppen Auswahl
             ui.horizontal(|ui| {
                 ui.label(self.app_language.label_group_select());
                 egui::ComboBox::from_id_salt("group_select")
-                    .selected_text(&self.selected_group)
+                    .selected_text(egui::RichText::new(&self.selected_group).strong())
                     .width(150.0)
                     .show_ui(ui, |ui| {
                         for lang in self.languages.keys() {
@@ -179,8 +219,6 @@ impl eframe::App for VersionSwitcherApp {
                     });
 
                 ui.add_space(10.0);
-
-                // Neue Gruppe hinzufügen
                 ui.text_edit_singleline(&mut self.new_group_name)
                     .on_hover_text(self.app_language.tooltip_new_group());
 
@@ -195,57 +233,47 @@ impl eframe::App for VersionSwitcherApp {
 
             ui.separator();
 
-            // --- NEUE VERSION HINZUFÜGEN ---
+            // Neuer Eintrag Hinzufügen
             ui.group(|ui| {
-                ui.label(egui::RichText::new(self.app_language.header_add_version(&self.selected_group)).strong());
+                ui.label(egui::RichText::new(self.app_language.header_add_version(&self.selected_group)).strong().color(egui::Color32::from_rgb(255, 140, 0)));
 
                 let mut add_clicked = false;
-
                 ui.horizontal(|ui| {
-                    // NAME INPUT
                     ui.label(self.app_language.label_name());
-                    ui.add(egui::TextEdit::singleline(&mut self.new_alias_input)
-                        .desired_width(80.0)
-                        .hint_text(self.app_language.hint_name()));
+                    ui.add(egui::TextEdit::singleline(&mut self.new_alias_input).desired_width(80.0).hint_text(self.app_language.hint_name()));
 
-                    // PFAD INPUT & BUTTONS
                     ui.label(self.app_language.label_path());
-                    let path_field = ui.add(egui::TextEdit::singleline(&mut self.new_path_input)
-                        .desired_width(200.0)
-                        .hint_text(self.app_language.hint_path()));
+                    let path_field = ui.add(egui::TextEdit::singleline(&mut self.new_path_input).desired_width(200.0).hint_text(self.app_language.hint_path()));
 
-                    // -- Ordner-Auswahl Dialog --
                     if ui.button("📂").on_hover_text(self.app_language.tooltip_folder()).clicked() {
                         if let Some(path) = rfd::FileDialog::new().pick_folder() {
                             self.new_path_input = path.display().to_string();
+                            if self.new_alias_input.is_empty() {
+                                if let Some(folder_name) = path.file_name() {
+                                    self.new_alias_input = folder_name.to_string_lossy().to_string();
+                                }
+                            }
                         }
                     }
 
-                    // -- Validierung --
                     if !self.new_path_input.is_empty() {
-                        let path_exists = Path::new(&self.new_path_input).is_dir();
-                        if path_exists {
+                        if Path::new(&self.new_path_input).is_dir() {
                             ui.label("✅").on_hover_text(self.app_language.status_path_ok());
                         } else {
                             ui.label("❌").on_hover_text(self.app_language.status_path_missing());
                         }
                     }
 
-                    // Enter im Pfad-Feld
                     if path_field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         add_clicked = true;
                     }
                 });
 
                 ui.add_space(5.0);
-
-                // Button
-                let btn = egui::Button::new(format!("➕ {}", self.app_language.btn_add()));
-                if ui.add_enabled(!self.new_path_input.is_empty(), btn).clicked() {
+                if ui.add_sized([ui.available_width(), 25.0], egui::Button::new(format!("➕ {}", self.app_language.btn_add()))).clicked() {
                     add_clicked = true;
                 }
 
-                // Logik zum Hinzufügen
                 if add_clicked && !self.new_path_input.is_empty() {
                     if let Some(versions) = self.languages.get_mut(&self.selected_group) {
                         versions.push(VersionEntry {
@@ -259,71 +287,133 @@ impl eframe::App for VersionSwitcherApp {
             });
 
             ui.add_space(10.0);
-
-            // --- LISTE DER VERSIONEN ---
             ui.label(egui::RichText::new(self.app_language.header_available()).heading());
 
-            let mut versions_clone = Vec::new();
-            if let Some(versions) = self.languages.get(&self.selected_group) {
-                versions_clone = versions.clone();
-            }
-
+            // --- 3. & 4. SORTIEREN & EDITIEREN LOGIK ---
+            let mut move_up = None;
+            let mut move_down = None;
             let mut delete_index = None;
+            let mut start_edit = None;
+            let mut save_edit = None;
+            let mut cancel_edit = false;
+            // FIX: Variable um den Switch-Wunsch zu speichern, statt direkt auszuführen
+            let mut activate_version = None;
 
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for (idx, entry) in versions_clone.iter().enumerate() {
-                    ui.group(|ui| {
-                        ui.horizontal(|ui| {
-                            // Exakter Pfad-Check
-                            let is_active = current_sys_paths.iter()
-                                .any(|p| p.eq_ignore_ascii_case(&entry.path));
+            // FIX: Lokale Variable für Language, um self-Borrowing in der Schleife zu vermeiden
+            let lang = self.app_language;
 
-                            // STATUS ICON
-                            if is_active {
-                                ui.label("🟢");
+            if let Some(versions) = self.languages.get_mut(&self.selected_group) {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    let len = versions.len();
+
+                    for (idx, entry) in versions.iter_mut().enumerate() {
+                        ui.group(|ui| {
+                            // IST DIESER EINTRAG GERADE IM EDITIER-MODUS?
+                            if self.editing_index == Some(idx) {
+                                // --- EDITIER MODUS ---
+                                ui.horizontal(|ui| {
+                                    ui.label("Name:");
+                                    ui.text_edit_singleline(&mut self.edit_name_buffer);
+                                    ui.label("Pfad:");
+                                    ui.text_edit_singleline(&mut self.edit_path_buffer);
+
+                                    // Speichern
+                                    if ui.button("💾").on_hover_text(lang.tooltip_save()).clicked() {
+                                        save_edit = Some(idx);
+                                    }
+                                    // Abbrechen
+                                    if ui.button("❌").on_hover_text(lang.tooltip_cancel()).clicked() {
+                                        cancel_edit = true;
+                                    }
+                                });
                             } else {
-                                ui.label("⚪");
-                            }
+                                // --- ANZEIGE MODUS ---
+                                ui.horizontal(|ui| {
+                                    let is_active = current_sys_paths.iter().any(|p| p.eq_ignore_ascii_case(&entry.path));
 
-                            // INFO TEXT
-                            ui.vertical(|ui| {
-                                ui.label(egui::RichText::new(&entry.alias).strong());
-                                // Prüfen ob Pfad existiert
-                                let path_exists = Path::new(&entry.path).is_dir();
-                                let path_text = egui::RichText::new(&entry.path).small().weak();
-                                if !path_exists {
-                                    ui.horizontal(|ui| {
-                                        ui.label(path_text.color(egui::Color32::RED));
-                                        ui.label("⚠️").on_hover_text(self.app_language.tooltip_missing_folder());
+                                    if is_active { ui.label("🟢"); } else { ui.label("⚪"); }
+
+                                    // Sortier Pfeile
+                                    ui.vertical(|ui| {
+                                        if idx > 0 {
+                                            if ui.small_button("⬆").on_hover_text(lang.tooltip_move_up()).clicked() { move_up = Some(idx); }
+                                        }
+                                        if idx < len - 1 {
+                                            if ui.small_button("⬇").on_hover_text(lang.tooltip_move_down()).clicked() { move_down = Some(idx); }
+                                        }
                                     });
-                                } else {
-                                    ui.label(path_text);
-                                }
-                            });
 
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                // LÖSCHEN
-                                if ui.button("🗑").on_hover_text(self.app_language.tooltip_delete()).clicked() {
-                                    delete_index = Some(idx);
-                                }
+                                    ui.vertical(|ui| {
+                                        ui.label(egui::RichText::new(&entry.alias).strong().size(16.0));
+                                        let path_exists = Path::new(&entry.path).is_dir();
+                                        let path_text = egui::RichText::new(&entry.path).small().weak();
+                                        if !path_exists {
+                                            ui.horizontal(|ui| {
+                                                ui.label(path_text.color(egui::Color32::RED));
+                                                ui.label("⚠️").on_hover_text(lang.tooltip_missing_folder());
+                                            });
+                                        } else {
+                                            ui.label(path_text);
+                                        }
+                                    });
 
-                                // AKTIVIEREN
-                                let btn_text = if is_active { self.app_language.btn_is_active() } else { self.app_language.btn_activate() };
-                                let btn = egui::Button::new(btn_text).selected(is_active);
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        // Löschen
+                                        if ui.button("🗑").on_hover_text(lang.tooltip_delete()).clicked() { delete_index = Some(idx); }
 
-                                if ui.add_enabled(!is_active, btn).clicked() {
-                                    self.switch_version(&entry.path, &entry.alias);
-                                }
-                            });
+                                        // Editieren Starten
+                                        if ui.button("✏").on_hover_text(lang.tooltip_edit()).clicked() { start_edit = Some((idx, entry.alias.clone(), entry.path.clone())); }
+
+                                        // Aktivieren
+                                        let btn_text = if is_active { lang.btn_is_active() } else { lang.btn_activate() };
+                                        let btn = egui::Button::new(btn_text).selected(is_active);
+                                        if ui.add_enabled(!is_active, btn).clicked() {
+                                            // FIX: NICHT self.switch_version aufrufen, sondern merken!
+                                            activate_version = Some((entry.path.clone(), entry.alias.clone()));
+                                        }
+                                    });
+                                });
+                            }
                         });
-                    });
-                }
-            });
+                    }
+                });
 
-            if let Some(idx) = delete_index {
-                if let Some(versions) = self.languages.get_mut(&self.selected_group) {
-                    versions.remove(idx);
+                // --- AKTIONEN DURCHFÜHREN (Nach der Schleife) ---
+                // 1. Sortieren
+                if let Some(idx) = move_up { versions.swap(idx, idx - 1); }
+                if let Some(idx) = move_down { versions.swap(idx, idx + 1); }
+
+                // 2. Editieren Starten
+                if let Some((idx, name, path)) = start_edit {
+                    self.editing_index = Some(idx);
+                    self.edit_name_buffer = name;
+                    self.edit_path_buffer = path;
                 }
+
+                // 3. Editieren Speichern
+                if let Some(idx) = save_edit {
+                    if let Some(entry) = versions.get_mut(idx) {
+                        entry.alias = self.edit_name_buffer.clone();
+                        entry.path = self.edit_path_buffer.clone();
+                    }
+                    self.editing_index = None;
+                }
+
+                // 4. Editieren Abbrechen
+                if cancel_edit {
+                    self.editing_index = None;
+                }
+
+                // 5. Löschen
+                if let Some(idx) = delete_index {
+                    versions.remove(idx);
+                    if self.editing_index == Some(idx) { self.editing_index = None; }
+                }
+            } // Hier endet der Borrow von self.languages (versions)
+
+            // FIX: Hier führen wir das Umschalten aus, da "versions" nicht mehr ausgeliehen ist
+            if let Some((path, alias)) = activate_version {
+                self.switch_version(&path, &alias);
             }
 
             ui.add_space(10.0);

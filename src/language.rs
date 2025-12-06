@@ -6,7 +6,6 @@ pub enum Language {
     German,
 }
 
-// Hier definieren wir alle Texte für die App
 impl Language {
     pub fn label_app_language(&self) -> &str {
         match self {
@@ -63,8 +62,8 @@ impl Language {
 
     pub fn hint_path(&self) -> &str {
         match self {
-            Language::English => "C:\\Program Files\\...",
-            Language::German => "C:\\Programme\\...",
+            Language::English => "C:\\Program Files\\... (or drag & drop folder)",
+            Language::German => "C:\\Programme\\... (oder Ordner hierher ziehen)",
         }
     }
 
@@ -110,6 +109,42 @@ impl Language {
         }
     }
 
+    // NEU: Editieren & Sortieren
+    pub fn tooltip_edit(&self) -> &str {
+        match self {
+            Language::English => "Edit",
+            Language::German => "Bearbeiten",
+        }
+    }
+
+    pub fn tooltip_save(&self) -> &str {
+        match self {
+            Language::English => "Save changes",
+            Language::German => "Änderungen speichern",
+        }
+    }
+
+    pub fn tooltip_cancel(&self) -> &str {
+        match self {
+            Language::English => "Cancel",
+            Language::German => "Abbrechen",
+        }
+    }
+
+    pub fn tooltip_move_up(&self) -> &str {
+        match self {
+            Language::English => "Move up",
+            Language::German => "Nach oben",
+        }
+    }
+
+    pub fn tooltip_move_down(&self) -> &str {
+        match self {
+            Language::English => "Move down",
+            Language::German => "Nach unten",
+        }
+    }
+
     pub fn tooltip_missing_folder(&self) -> &str {
         match self {
             Language::English => "Folder not found on disk!",
@@ -147,8 +182,8 @@ impl Language {
 
     pub fn status_ready(&self) -> &str {
         match self {
-            Language::English => "Ready.",
-            Language::German => "Bereit.",
+            Language::English => "Ready. Drag & Drop folder supported.",
+            Language::German => "Bereit. Drag & Drop von Ordnern möglich.",
         }
     }
 
