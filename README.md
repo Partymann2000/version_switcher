@@ -2,8 +2,7 @@
 
 A modern, lightweight Windows desktop application built with **Rust** to easily manage and switch between different versions of programming languages (like Python, Node.js, PHP, Java) or any other command-line tools.
 
-<img width="691" height="853" alt="Screenshot 2025-12-05 232914" src="https://github.com/user-attachments/assets/f9edd818-b546-4cb7-a126-10f88fff770f" />
-
+<img width="976" height="852" alt="Screenshot 2025-12-06 145331" src="https://github.com/user-attachments/assets/34cf6132-5707-47f6-8f9b-628725c3f26a" />
 
 ## **🚀 Why this tool?**
 
