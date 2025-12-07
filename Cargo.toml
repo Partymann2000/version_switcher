@@ -1,7 +1,8 @@
 [package]
 name = "version_switcher"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
+authors = ["Partymann2000"]
 
 # Abhängigkeiten für das eigentliche Programm (main.rs)
 [dependencies]
@@ -13,6 +14,7 @@ winapi = { version = "0.3", features = ["winuser"] }
 notify-rust = "4"
 rfd = "0.16.0"
 serde_json = "1.0"
+chrono = "0.4.42"
 
 # WICHTIG: Abhängigkeiten für das Build-Skript (build.rs) gehören hierhin!
 [build-dependencies]

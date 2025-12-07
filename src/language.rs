@@ -35,6 +35,14 @@ impl Language {
         }
     }
 
+    // NEU: Tooltip für Gruppe löschen
+    pub fn tooltip_delete_group(&self) -> &str {
+        match self {
+            Language::English => "Delete current group",
+            Language::German => "Aktuelle Gruppe löschen",
+        }
+    }
+
     pub fn header_add_version(&self, group: &str) -> String {
         match self {
             Language::English => format!("Add new {} version", group),
@@ -199,15 +207,15 @@ impl Language {
 
     pub fn tooltip_import(&self) -> &str {
         match self {
-            Language::English => "Import configuration (JSON)",
-            Language::German => "Konfiguration importieren (JSON)",
+            Language::English => "Import configuration",
+            Language::German => "Konfiguration importieren",
         }
     }
 
     pub fn tooltip_export(&self) -> &str {
         match self {
-            Language::English => "Export configuration (JSON)",
-            Language::German => "Konfiguration exportieren (JSON)",
+            Language::English => "Export configuration",
+            Language::German => "Konfiguration exportieren",
         }
     }
 
@@ -241,8 +249,8 @@ impl Language {
 
     pub fn tooltip_cleaner(&self) -> &str {
         match self {
-            Language::English => "Path Cleaner: Find broken or duplicate paths",
-            Language::German => "Pfad-Bereinigung: Defekte oder doppelte Pfade finden",
+            Language::English => "Path Cleaner",
+            Language::German => "Pfad-Bereinigung",
         }
     }
 
@@ -262,8 +270,8 @@ impl Language {
 
     pub fn label_no_issues(&self) -> &str {
         match self {
-            Language::English => "Great! No broken or duplicate paths found.",
-            Language::German => "Super! Keine defekten oder doppelten Pfade gefunden.",
+            Language::English => "No issues found.",
+            Language::German => "Keine Probleme gefunden.",
         }
     }
 
@@ -276,8 +284,8 @@ impl Language {
 
     pub fn status_cleaned(&self, count: usize) -> String {
         match self {
-            Language::English => format!("Removed {} entries from PATH.", count),
-            Language::German => format!("{} Einträge aus PATH entfernt.", count),
+            Language::English => format!("Removed {} entries.", count),
+            Language::German => format!("{} Einträge entfernt.", count),
         }
     }
 
@@ -295,11 +303,38 @@ impl Language {
         }
     }
 
-    // NEU: Akzentfarbe
     pub fn tooltip_accent_color(&self) -> &str {
         match self {
             Language::English => "Change accent color",
             Language::German => "Akzentfarbe ändern",
+        }
+    }
+
+    pub fn tooltip_history(&self) -> &str {
+        match self {
+            Language::English => "Activity History",
+            Language::German => "Aktivitäts-Verlauf",
+        }
+    }
+
+    pub fn window_history_title(&self) -> &str {
+        match self {
+            Language::English => "Activity History",
+            Language::German => "Aktivitäts-Verlauf",
+        }
+    }
+
+    pub fn btn_clear_history(&self) -> &str {
+        match self {
+            Language::English => "Clear History",
+            Language::German => "Verlauf leeren",
+        }
+    }
+
+    pub fn label_no_history(&self) -> &str {
+        match self {
+            Language::English => "No activity recorded yet.",
+            Language::German => "Noch keine Aktivitäten aufgezeichnet.",
         }
     }
 }

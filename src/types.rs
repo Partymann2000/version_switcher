@@ -1,17 +1,15 @@
 use serde::{Deserialize, Serialize};
 
-// Unsere Haupt-Datenstruktur für einen Eintrag
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct VersionEntry {
     pub path: String,
     pub alias: String,
 }
 
-// Typen für den Path Cleaner
 #[derive(Clone, Debug, PartialEq)]
 pub enum IssueType {
-    Missing,   // Ordner weg
-    Duplicate, // Doppelter Eintrag
+    Missing,
+    Duplicate,
 }
 
 #[derive(Clone, Debug)]
@@ -19,4 +17,11 @@ pub struct CleanerEntry {
     pub path: String,
     pub issue: IssueType,
     pub selected: bool,
+}
+
+// NEU: Eintrag für den Verlauf
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct HistoryEntry {
+    pub time: String,    // z.B. "14:30:05"
+    pub message: String, // z.B. "Activated Python 3.11"
 }
