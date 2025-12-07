@@ -1,13 +1,16 @@
 // Verstecke das Konsolenfenster im Release-Modus unter Windows
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod app;
+// Module registrieren
+mod types;
+mod style;
+mod logic;
 mod language;
+mod app;
 
 use app::VersionSwitcherApp;
 
 fn main() -> eframe::Result<()> {
-    // Fenstergröße leicht angepasst für die neuen Elemente
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([650.0, 700.0]),

@@ -197,7 +197,6 @@ impl Language {
         format!("Error/Fehler: {}", err)
     }
 
-    // Import / Export
     pub fn tooltip_import(&self) -> &str {
         match self {
             Language::English => "Import configuration (JSON)",
@@ -240,7 +239,6 @@ impl Language {
         }
     }
 
-    // NEU: Path Cleaner
     pub fn tooltip_cleaner(&self) -> &str {
         match self {
             Language::English => "Path Cleaner: Find broken or duplicate paths",
@@ -294,6 +292,14 @@ impl Language {
         match self {
             Language::English => "Duplicate",
             Language::German => "Duplikat",
+        }
+    }
+
+    // NEU: Akzentfarbe
+    pub fn tooltip_accent_color(&self) -> &str {
+        match self {
+            Language::English => "Change accent color",
+            Language::German => "Akzentfarbe ändern",
         }
     }
 }
