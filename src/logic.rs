@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::fs::File;
+use std::process::Command;
 use std::io::{BufReader, BufWriter};
 use winreg::enums::*;
 use winreg::RegKey;
@@ -139,4 +140,42 @@ pub fn perform_cleanup(current_path: &str, issues: &[CleanerEntry]) -> (String, 
     }
 
     (new_parts.join(";"), removed_count)
+}
+
+pub fn rebuild_icon_cache() -> Result<(), String> {
+    // 1. Explorer beenden
+    // Wir ignorieren Fehler hier (z.B. wenn Explorer gar nicht läuft)
+    let _ = Command::new("taskkill")
+        .args(&["/f", "/im", "explorer.exe"])
+        .output();
+
+    // Kurze Pause, um sicherzustellen, dass Dateizugriffe frei werden
+    std::thread::sleep(std::time::Duration::from_millis(1000));
+
+    let local_app_data = std::env::var("LOCALAPPDATA")
+        .map_err(|_| "LOCALAPPDATA environment variable not found".to_string())?;
+
+    // 2. IconCache.db löschen
+    // Pfad: %localappdata%\IconCache.db
+    let db_path = format!("{}\\IconCache.db", local_app_data);
+
+    // Wir nutzen cmd /C del, um sicherzugehen, dass Attribute (/a) und Force (/f) wie im Batch funktionieren
+    let _ = Command::new("cmd")
+        .args(&["/C", "del", "/f", "/a", &db_path])
+        .output();
+
+    // 3. iconcache_*.db löschen
+    // Pfad: %localappdata%\Microsoft\Windows\Explorer\iconcache_*.db
+    let db_wildcard_path = format!("{}\\Microsoft\\Windows\\Explorer\\iconcache_*.db", local_app_data);
+
+    let _ = Command::new("cmd")
+        .args(&["/C", "del", "/f", "/a", &db_wildcard_path])
+        .output();
+
+    // 4. Explorer neu starten
+    Command::new("explorer.exe")
+        .spawn()
+        .map_err(|e| format!("Could not restart explorer: {}", e))?;
+
+    Ok(())
 }

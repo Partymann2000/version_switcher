@@ -337,4 +337,25 @@ impl Language {
             Language::German => "Noch keine Aktivitäten aufgezeichnet.",
         }
     }
+
+    pub fn tooltip_icon_cache(&self) -> &str {
+        match self {
+            Language::English => "Rebuild Icon Cache (Restarts Explorer)",
+            Language::German => "Icon-Cache neu aufbauen (Startet Explorer neu)",
+        }
+    }
+
+    pub fn status_icon_cache_ok(&self) -> &str {
+        match self {
+            Language::English => "Icon Cache rebuilt.",
+            Language::German => "Icon-Cache neu aufgebaut.",
+        }
+    }
+
+    pub fn status_icon_cache_err(&self, err: &str) -> String {
+        match self {
+            Language::English => format!("Error rebuilding icons: {}", err),
+            Language::German => format!("Fehler beim Icon-Cache: {}", err),
+        }
+    }
 }

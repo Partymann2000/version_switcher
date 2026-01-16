@@ -327,6 +327,21 @@ impl eframe::App for VersionSwitcherApp {
                         }
                     }
 
+                    // --- NEU: ICON CACHE BUTTON ---
+                    ui.add_space(5.0);
+                    if ui.button("🖼").on_hover_text(self.app_language.tooltip_icon_cache()).clicked() {
+                        match logic::rebuild_icon_cache() {
+                            Ok(_) => {
+                                self.status_message = self.app_language.status_icon_cache_ok().to_string();
+                                self.add_to_history("Rebuilt Icon Cache".to_string());
+                            },
+                            Err(e) => {
+                                self.status_message = self.app_language.status_icon_cache_err(&e);
+                            }
+                        }
+                    }
+                    // -----------------------------
+
                     // History
                     ui.add_space(5.0);
                     if ui.button("📜").on_hover_text(self.app_language.tooltip_history()).clicked() {
@@ -451,14 +466,11 @@ impl eframe::App for VersionSwitcherApp {
 
             ui.add_space(10.0);
 
-            // --- HEADER LISTE & SUCHE (Repariert) ---
+            // --- HEADER LISTE & SUCHE ---
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(self.app_language.header_available()).heading());
 
-                // Wir nutzen `right_to_left` um die Elemente am rechten Rand auszurichten.
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-
-                    // FIX: Stabile Gruppe von LINKS nach RECHTS
                     ui.horizontal(|ui| {
                         ui.label("🔍");
 
@@ -467,12 +479,10 @@ impl eframe::App for VersionSwitcherApp {
                             Language::German => "Suchen...",
                         };
 
-                        // ID für Fokus-Stabilität
                         ui.push_id("search_query_input", |ui| {
                             ui.add(egui::TextEdit::singleline(&mut self.search_query).hint_text(hint).desired_width(150.0));
                         });
 
-                        // X-Button kommt DANACH, verändert also nicht den Index des Inputs
                         if !self.search_query.is_empty() {
                             if ui.button("❌").clicked() {
                                 self.search_query.clear();
